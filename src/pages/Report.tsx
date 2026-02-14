@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import * as tf from "@tensorflow/tfjs";
+import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import { useLang } from "@/components/LangProvider";
 import { MapPin, Camera, AlertTriangle, CheckCircle, Loader2, ShieldCheck, Lightbulb } from "lucide-react";
 import { toast } from "sonner";
@@ -6,28 +8,40 @@ import { useNavigate } from "react-router-dom";
 import CircularGauge from "@/components/CircularGauge";
 import { mockReports } from "@/lib/mockData";
 
-const DIY_SUGGESTIONS: Record<string, string[]> = {
-  Waste: [
-    "1. Wear gloves and a mask before handling waste.",
-    "2. Separate recyclables (plastic, paper, glass) from organic waste.",
-    "3. Use a dustbin or bag to collect scattered trash.",
-    "4. Contact your local waste collection service for pickup.",
-    "5. Dispose of organic waste in a compost pit if available.",
-  ],
-  Water: [
-    "1. Avoid direct contact with stagnant water.",
-    "2. Clear any blockages in nearby drainage channels.",
-    "3. Apply mosquito repellent around the area.",
-    "4. Use bleaching powder to disinfect small stagnant pools.",
-    "5. Report persistent water logging to your water utility.",
-  ],
-  Road: [
-    "1. Place visible markers (cones, branches) around the hazard.",
-    "2. Alert other pedestrians and motorists verbally.",
-    "3. Take photos and share on community groups for awareness.",
-    "4. For small potholes, fill temporarily with gravel if safe.",
-    "5. Contact the local road maintenance department immediately.",
-  ],
+const ISSUE_DETAILS: Record<string, { precautions: string[], healthImpact: string, climateImpact: string }> = {
+  Waste: {
+    precautions: [
+      "1. Wear gloves and a mask before handling waste.",
+      "2. Separate recyclables (plastic, paper, glass) from organic waste.",
+      "3. Use a dustbin or bag to collect scattered trash.",
+      "4. Contact your local waste collection service for pickup.",
+      "5. Dispose of organic waste in a compost pit if available.",
+    ],
+    healthImpact: "Accumulated waste attracts pests (rats, flies) which spread diseases like Leptospirosis, Dengue, and Cholera. Decomposing waste releases toxic gases posing respiratory risks.",
+    climateImpact: "Rotting organic waste releases Methane, a potent greenhouse gas. Plastics break down into microplastics, contaminating soil and water bodies.",
+  },
+  Water: {
+    precautions: [
+      "1. Avoid direct contact with stagnant water.",
+      "2. Clear any blockages in nearby drainage channels.",
+      "3. Apply mosquito repellent around the area.",
+      "4. Use bleaching powder to disinfect small stagnant pools.",
+      "5. Report persistent water logging to your water utility.",
+    ],
+    healthImpact: "Stagnant water is a breeding ground for mosquitoes, leading to outbreaks of Malaria, Dengue, and Chikungunya. Contaminated water can cause skin infections and gastrointestinal diseases.",
+    climateImpact: "Water stagnation damages infrastructure and soil structure. It also indicates poor drainage systems which are vulnerable to extreme weather events caused by climate change.",
+  },
+  Road: {
+    precautions: [
+      "1. Place visible markers (cones, branches) around the hazard.",
+      "2. Alert other pedestrians and motorists verbally.",
+      "3. Take photos and share on community groups for awareness.",
+      "4. For small potholes, fill temporarily with gravel if safe.",
+      "5. Contact the local road maintenance department immediately.",
+    ],
+    healthImpact: "Damaged roads cause accidents leading to physical injuries. Dust from broken roads contributes to air pollution, aggravating asthma and other respiratory conditions.",
+    climateImpact: "Poor road quality increases vehicle fuel consumption and emissions due to traffic congestion and idling. It also increases the heat island effect in urban areas.",
+  },
 };
 
 const Report = () => {
@@ -47,13 +61,30 @@ const Report = () => {
   const fileRef = useRef<HTMLInputElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
 
+  const [address, setAddress] = useState<string>("");
+
   const requestGPS = () => {
     setGpsError(false);
     navigator.geolocation.getCurrentPosition(
-      (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setCoords({ lat: latitude, lng: longitude });
+        fetchAddress(latitude, longitude);
+      },
       () => setGpsError(true),
       { enableHighAccuracy: true, timeout: 10000 }
     );
+  };
+
+  const fetchAddress = async (lat: number, lng: number) => {
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+      const data = await response.json();
+      setAddress(data.display_name || "Unknown Location");
+    } catch (error) {
+      console.error("Error fetching address:", error);
+      setAddress("Location details unavailable");
+    }
   };
 
   useEffect(() => { requestGPS(); }, []);
@@ -89,65 +120,174 @@ const Report = () => {
     return () => { cancelled = true; };
   }, [coords]);
 
-  const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // State for AI Model
+  const [model, setModel] = useState<cocoSsd.ObjectDetection | null>(null);
+  const [modelLoading, setModelLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadModel = async () => {
+      try {
+        console.log("Loading AI Model...");
+        await tf.ready();
+        const loadedModel = await cocoSsd.load();
+        if (isMounted) {
+          setModel(loadedModel);
+          setModelLoading(false);
+          console.log("AI Model Loaded Successfully");
+        }
+      } catch (err) {
+        console.error("Failed to load AI Model:", err);
+        if (isMounted) {
+          setModelLoading(false);
+          toast.error("AI Model failed to load. Check your internet connection.");
+        }
+      }
+    };
+
+    loadModel();
+    return () => { isMounted = false; };
+  }, []);
+
+  const handleImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Check if model is ready
+    if (modelLoading) {
+      toast.info("Please wait, AI Model is still loading...");
+      return;
+    }
+
     setImageFile(file);
     setDuplicate(false);
     setInvalid(false);
     setCategory(null);
     setConfidenceScore(0);
     setIsMinor(false);
+    setAnalyzing(true);
 
     const reader = new FileReader();
-    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    reader.onload = async (ev) => {
+      const imgSrc = ev.target?.result as string;
+      setImagePreview(imgSrc);
 
-    // Simulate AI analysis with confidence score
-    setAnalyzing(true);
-    setTimeout(() => {
-      const rand = Math.random();
+      const img = new Image();
+      img.src = imgSrc;
+      img.crossOrigin = "anonymous"; // Handle potential CORS issues
+      img.onload = async () => {
+        try {
+          // Use pre-loaded model or fallback
+          const activeModel = model || await cocoSsd.load();
+          const predictions = await activeModel.detect(img);
+          console.log("AI Predictions:", predictions);
 
-      // Check for duplicates by comparing GPS proximity with existing reports
-      if (coords) {
-        const nearbyReport = mockReports.find(
-          (r) =>
-            Math.abs(r.location.lat - coords.lat) < 0.005 &&
-            Math.abs(r.location.lng - coords.lng) < 0.005
-        );
-        if (nearbyReport && rand < 0.25) {
-          setDuplicate(true);
+          // Define Forbidden Classes (People, Animals, Personal/Indoor Items)
+          const forbiddenClasses = [
+            // Living Beings
+            "person", "cat", "dog", "bird", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe",
+            // Indoor/Personal Items
+            "backpack", "umbrella", "handbag", "tie", "suitcase", "bed", "dining table", "toilet",
+            "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator",
+            "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+            // Sports
+            "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+            // Furniture
+            "chair", "couch", "potted plant"
+          ];
+
+          // Check if any forbidden object is detected with high confidence
+          const hasForbiddenObject = predictions.some(p => forbiddenClasses.includes(p.class) && p.score > 0.50);
+
+          if (hasForbiddenObject) {
+            setInvalid(true);
+            setAnalyzing(false);
+            toast.error("❌ Invalid Image: Non-civic or personal object detected.");
+            return;
+          }
+
+          // If valid, proceed to categorization
+          setTimeout(() => {
+            // Heuristic Categorization based on detection if possible, or fallback
+            let detectedCategory = "Waste"; // Default
+
+            // Try to map detections to categories
+            const wasteKeywords = ["bottle", "cup", "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake"];
+            const roadKeywords = ["car", "bus", "truck", "motorcycle", "traffic light", "stop sign"];
+
+            const foundWaste = predictions.find(p => wasteKeywords.includes(p.class));
+            const foundRoad = predictions.find(p => roadKeywords.includes(p.class));
+
+            if (foundWaste) detectedCategory = "Waste";
+            else if (foundRoad) detectedCategory = "Road";
+            else detectedCategory = ["Waste", "Water", "Road"][Math.floor(Math.random() * 3)]; // Fallback
+
+            // Check for duplicates (simulated)
+            if (coords) {
+              const nearbyReport = mockReports.find(
+                (r) =>
+                  Math.abs(r.location.lat - coords.lat) < 0.005 &&
+                  Math.abs(r.location.lng - coords.lng) < 0.005
+              );
+              if (nearbyReport && Math.random() < 0.25) {
+                setDuplicate(true);
+                setAnalyzing(false);
+                toast.info("💡 Duplicate detected — redirecting to Dashboard to upvote.");
+                setTimeout(() => navigate("/dashboard"), 3000);
+                return;
+              }
+            }
+
+            setCategory(detectedCategory);
+            setConfidenceScore(Math.floor(Math.random() * 20) + 80);
+            setIsMinor(Math.random() < 0.35);
+            setAnalyzing(false);
+          }, 1000);
+
+        } catch (err) {
+          console.error("AI Error:", err);
+          toast.error("AI Analysis failed. Please try again.");
           setAnalyzing(false);
-          toast.info("💡 Duplicate detected — redirecting to Dashboard to upvote.");
-          setTimeout(() => navigate("/dashboard"), 3000);
-          return;
         }
-      }
-
-      // Validity check — reject humans, pets, documents
-      if (rand < 0.12) {
-        setInvalid(true);
-        setAnalyzing(false);
-        return;
-      }
-
-      // Auto-classification with confidence
-      const cats = ["Waste", "Water", "Road"];
-      const selectedCat = cats[Math.floor(Math.random() * cats.length)];
-      const confidence = Math.floor(Math.random() * 20) + 80; // 80-99%
-      const minor = Math.random() < 0.35;
-
-      setCategory(selectedCat);
-      setConfidenceScore(confidence);
-      setIsMinor(minor);
-      setAnalyzing(false);
-    }, 2000);
+      };
+    };
+    reader.readAsDataURL(file);
   };
 
-  const handleSubmit = () => {
+  const [uploading, setUploading] = useState(false);
+
+  const handleSubmit = async () => {
     if (!coords || !category || !imageFile) return;
-    setSubmitted(true);
-    toast.success(t("reportSubmitted"));
+
+    setUploading(true);
+    const formData = new FormData();
+    formData.append("category", category);
+    formData.append("confidence", confidenceScore.toString());
+    formData.append("lat", coords.lat.toString());
+    formData.append("lng", coords.lng.toString());
+    formData.append("address", address); // Include address in submission
+    formData.append("image", imageFile);
+
+    try {
+      const response = await fetch("http://localhost:5000/api/reports", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        setSubmitted(true);
+        toast.success(t("reportSubmitted"));
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.message || "Failed to submit report. Please try again.");
+      }
+    } catch (error) {
+      console.error("Error submitting report:", error);
+      toast.error("Network error. Is the backend running?");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -178,6 +318,8 @@ const Report = () => {
             <>
               <p className="text-xs text-muted-foreground mb-3">
                 📍 {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
+                <br />
+                🏠 {address || "Fetching address..."}
               </p>
               <div ref={mapRef} className="w-full h-64 rounded-lg overflow-hidden border border-border" />
             </>
@@ -237,20 +379,43 @@ const Report = () => {
               </div>
 
               {/* DIY Suggestions for Minor Issues */}
-              {isMinor && category && (
-                <div className="p-5 rounded-lg bg-accent/10 border border-accent/30 animate-fade-up">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Lightbulb className="h-5 w-5 text-warning" />
-                    <h3 className="text-sm font-bold text-foreground">🛠️ You Can Fix This!</h3>
+              {(
+                <div className="space-y-4 animate-fade-up">
+
+                  {/* Health Impact */}
+                  <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle className="h-5 w-5 text-red-500" />
+                      <h3 className="text-sm font-bold text-foreground">Health Impact</h3>
+                    </div>
+                    <p className="text-sm text-foreground/80">{ISSUE_DETAILS[category]?.healthImpact}</p>
                   </div>
-                  <p className="text-xs text-muted-foreground mb-3">
-                    This issue is categorized as <span className="text-warning font-semibold">Minor</span>. Here are some steps you can take:
-                  </p>
-                  <ul className="space-y-1.5">
-                    {DIY_SUGGESTIONS[category]?.map((step, i) => (
-                      <li key={i} className="text-sm text-foreground/80">{step}</li>
-                    ))}
-                  </ul>
+
+                  {/* Climate Impact */}
+                  <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Lightbulb className="h-5 w-5 text-green-500" />
+                      <h3 className="text-sm font-bold text-foreground">Climate Impact</h3>
+                    </div>
+                    <p className="text-sm text-foreground/80">{ISSUE_DETAILS[category]?.climateImpact}</p>
+                  </div>
+
+                  {/* Precautions */}
+                  <div className="p-5 rounded-lg bg-accent/10 border border-accent/30">
+                    <div className="flex items-center gap-2 mb-3">
+                      <ShieldCheck className="h-5 w-5 text-warning" />
+                      <h3 className="text-sm font-bold text-foreground">🛡️ Precautions & Actions</h3>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Here are some steps you can take to mitigate this issue:
+                    </p>
+                    <ul className="space-y-1.5">
+                      {ISSUE_DETAILS[category]?.precautions.map((step, i) => (
+                        <li key={i} className="text-sm text-foreground/80">{step}</li>
+                      ))}
+                    </ul>
+                  </div>
+
                 </div>
               )}
             </div>
@@ -263,7 +428,11 @@ const Report = () => {
             onClick={handleSubmit}
             className="gradient-bg gradient-bg-hover w-full py-4 rounded-xl font-bold text-primary-foreground text-lg hover:scale-[1.02] transition-all"
           >
-            {t("submitReport")}
+            {uploading ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin" /> Submitting...
+              </span>
+            ) : t("submitReport")}
           </button>
         )}
 

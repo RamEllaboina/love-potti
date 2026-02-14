@@ -1,16 +1,58 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLang } from "@/components/LangProvider";
 import { mockReports } from "@/lib/mockData";
 import CircularGauge from "@/components/CircularGauge";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { Clock, Shield } from "lucide-react";
 
+interface ReportData {
+  _id: string;
+  category: string;
+  description: string;
+  location: { lat: number; lng: number };
+  imageUrl: string;
+  status: "solved" | "in_progress" | "not_solved";
+  upvotes: number;
+  createdAt: string;
+  address?: string; // Optional as backend might not return address yet
+}
+
 const History = () => {
   const { t } = useLang();
   const [view, setView] = useState<"user" | "admin">("user");
+  const [reports, setReports] = useState<ReportData[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const userReports = mockReports.filter((_, i) => i < 3); // simulate user's own reports
-  const allReports = mockReports;
+  useEffect(() => {
+    const fetchReports = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/api/reports");
+        if (res.ok) {
+          const data = await res.json();
+          // Map backend data to match frontend structure if needed
+          const formattedData = data.map((r: any) => ({
+            ...r,
+            id: r._id, // Map _id to id for compatibility
+            description: r.description || "No description provided",
+            address: `${r.location.lat.toFixed(4)}, ${r.location.lng.toFixed(4)}` // Fallback address
+          }));
+          setReports(formattedData);
+        } else {
+          console.error("Failed to fetch reports");
+          setReports(mockReports as any); // Fallback to mock data
+        }
+      } catch (err) {
+        console.error("Error fetching reports:", err);
+        setReports(mockReports as any); // Fallback to mock data
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchReports();
+  }, []);
+
+  const userReports = reports.length > 0 ? reports.slice(0, 3) : mockReports.slice(0, 3); // Just for demo, assuming user owns first few
+  const allReports = reports.length > 0 ? reports : mockReports;
 
   const statusCounts = {
     not_solved: allReports.filter((r) => r.status === "not_solved").length,
@@ -77,13 +119,12 @@ const History = () => {
                     </p>
                   </div>
                   <span
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                      r.status === "solved"
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${r.status === "solved"
                         ? "bg-primary/20 text-primary"
                         : r.status === "in_progress"
-                        ? "bg-warning/20 text-warning"
-                        : "bg-destructive/20 text-destructive"
-                    }`}
+                          ? "bg-warning/20 text-warning"
+                          : "bg-destructive/20 text-destructive"
+                      }`}
                   >
                     {r.status === "solved" ? "🟢 " + t("solved") : r.status === "in_progress" ? "🟡 " + t("inProgress") : "🔴 " + t("notSolved")}
                   </span>
@@ -149,9 +190,8 @@ const History = () => {
                     <span className="text-xs text-muted-foreground">{r.address}</span>
                     <span className="text-xs">👍 {r.upvotes}</span>
                     <span
-                      className={`text-xs font-bold ${
-                        r.status === "solved" ? "text-primary" : r.status === "in_progress" ? "text-warning" : "text-destructive"
-                      }`}
+                      className={`text-xs font-bold ${r.status === "solved" ? "text-primary" : r.status === "in_progress" ? "text-warning" : "text-destructive"
+                        }`}
                     >
                       {r.status === "solved" ? "🟢" : r.status === "in_progress" ? "🟡" : "🔴"}
                     </span>
