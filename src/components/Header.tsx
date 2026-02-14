@@ -12,6 +12,7 @@ const Header = () => {
     { path: "/health", label: t("health") },
     { path: "/precautions", label: t("precautions") },
     { path: "/dashboard", label: t("dashboard") },
+    { path: "/history", label: t("history") },
     { path: "/feedback", label: t("feedback") },
   ];
 
