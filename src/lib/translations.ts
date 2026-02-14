@@ -44,6 +44,10 @@ export const translations = {
     submitReport: "Submit Report",
     gpsTracking: "GPS Tracking Active",
     retryGps: "Retry GPS",
+    history: "History",
+    aiConfidence: "AI Confidence",
+    diyTitle: "You Can Fix This!",
+    diyMinor: "This issue is categorized as Minor.",
   },
   te: {
     home: "హోమ్", report: "రిపోర్ట్", health: "ఆరోగ్యం", precautions: "జాగ్రత్తలు",
@@ -90,6 +94,10 @@ export const translations = {
     submitReport: "నివేదికను సమర్పించండి",
     gpsTracking: "GPS ట్రాకింగ్ యాక్టివ్",
     retryGps: "GPS మళ్ళీ ప్రయత్నించండి",
+    history: "చరిత్ర",
+    aiConfidence: "AI విశ్వాసం",
+    diyTitle: "మీరు దీన్ని సరిచేయగలరు!",
+    diyMinor: "ఈ సమస్య చిన్నదిగా వర్గీకరించబడింది.",
   },
   hi: {
     home: "होम", report: "रिपोर्ट", health: "स्वास्थ्य", precautions: "सावधानियाँ",
@@ -136,6 +144,10 @@ export const translations = {
     submitReport: "रिपोर्ट सबमिट करें",
     gpsTracking: "GPS ट्रैकिंग सक्रिय",
     retryGps: "GPS पुनः प्रयास करें",
+    history: "इतिहास",
+    aiConfidence: "AI विश्वास",
+    diyTitle: "आप इसे ठीक कर सकते हैं!",
+    diyMinor: "इस समस्या को मामूली के रूप में वर्गीकृत किया गया है।",
   },
 } as const;
 

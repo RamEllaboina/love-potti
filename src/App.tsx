@@ -13,6 +13,7 @@ import Health from "./pages/Health";
 import Precautions from "./pages/Precautions";
 import Dashboard from "./pages/Dashboard";
 import Feedback from "./pages/Feedback";
+import History from "./pages/History";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -33,6 +34,7 @@ const App = () => (
             <Route path="/precautions" element={<Precautions />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/feedback" element={<Feedback />} />
+            <Route path="/history" element={<History />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
           <Footer />

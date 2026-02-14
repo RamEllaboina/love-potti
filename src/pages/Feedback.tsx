@@ -17,6 +17,13 @@ const Feedback = () => {
     toast.success(t("submitFeedback") + " ✅");
   };
 
+  // Trust score calculation (same logic as dashboard)
+  const statusCounts = {
+    solved: mockReports.filter((r) => r.status === "solved").length,
+    total: mockReports.length,
+  };
+  const trustScore = Math.round((statusCounts.solved / statusCounts.total) * 100);
+
   const downloadComplaint = () => {
     const doc = new jsPDF();
     const report = mockReports[0];
@@ -47,6 +54,8 @@ const Feedback = () => {
       "Environmental Impact:",
       "  - Carbon Footprint: 67%",
       "  - Soil Toxicity Index: 43%",
+      "",
+      `Community Trust Score: ${trustScore}%`,
       "",
       `Description: ${report.description}`,
       "",
@@ -142,7 +151,7 @@ const Feedback = () => {
         <div className="glass-card rounded-xl p-6">
           <h2 className="text-lg font-semibold text-foreground mb-3">Official Complaint Letter</h2>
           <p className="text-sm text-muted-foreground mb-4">
-            Generate a formal document with GPS coordinates, hazard category, risk timeline, and environmental scores for submission to authorities.
+            Generate a formal document with GPS coordinates, hazard category, risk timeline, environmental scores, and Community Trust Score for submission to authorities.
           </p>
           <button
             onClick={downloadComplaint}
